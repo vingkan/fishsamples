@@ -9,7 +9,7 @@ import java.util.regex.*;
  */
 public class LakeTown {
     
-    public static int INFECTION_TIME = 13;
+    public static int INFECTION_TIME = 11;
     public static int MAX_TURNS = 1000;
     public static int FAMILY_SIZE = 4; 
 
@@ -18,6 +18,7 @@ public class LakeTown {
     public static String FILE_GEO = "files/geo.txt";
     public static String FILE_PEOPLE = "files/people.txt";
     public static String FILE_CASES = "files/cases.txt";
+    public static String FILE_ENC_CASES = "files/enc_cases.txt";
     public static String FILE_SEED = "files/seed.txt";
 
     public static void main(String[] args){
@@ -27,7 +28,11 @@ public class LakeTown {
         City city = initCity();
         //initInfection(city);
         runSimulation(city);
+        findAllCases(city);
+        //findEarlyCases(city);
         
+        //Helper.printPeopleData(FILE_PEOPLE, city);
+        System.out.println("Outbreak Length: " + ((double)city.getTime() / 24.0) + " days.");
         Helper.closeAllFiles();
         
     }
@@ -92,6 +97,9 @@ public class LakeTown {
         for(Map.Entry<Class, List<Location>> entry : locMap.entrySet()){
             System.out.println(entry.getKey() + ": " + entry.getValue().size());
         }
+        for(Map.Entry<AgeGroup, List<Person>> entry : Person.groupPeopleByAgeGroup(city.getPeople()).entrySet()){
+            System.out.println(entry.getKey() + ": " + entry.getValue().size());
+        }
         return city;
     }
     
@@ -139,6 +147,12 @@ public class LakeTown {
             }
             return res;
         }
+        public Location getHome(){
+            return this.home;
+        }
+        public Location getWorkplace(){
+            return this.workplace;
+        }
     }
     
     public static class ChildRoutine extends Routine {
@@ -178,13 +192,16 @@ public class LakeTown {
     }
     
     public static class Restaurant extends Location {
-        private double frequencyEatContaminatedItem = 0.64;
+        private double frequencyEatContaminatedItem = 0.14;
         public Restaurant(String id, double lat, double lng, String name){
             super(id, lat, lng, name);
         }
         public void doInteractions(List<Person> people){
-            for(Person p : people){
-                for(Person q : people){
+            List<Person> contagious = Person.getContagious(people);
+            for(Person p : contagious){
+                for(int pidx = 0; pidx < 3; pidx++){
+                    int rand = (int)(Helper.nextSeed() * (double)people.size());
+                    Person q = people.get(rand);
                     if(p.getPathogen() != null){
                         q.doExposure(p.getPathogen());
                     }
@@ -192,7 +209,6 @@ public class LakeTown {
             }
             if(this.isInfected()){
                 int eatContaminatedFood = (int)(frequencyEatContaminatedItem * (double)people.size());
-                //System.out.println(eatContaminatedFood + " people ate contaminated food.");
                 int wereInfected = 0;
                 for(int c = 0; c < eatContaminatedFood; c++){
                     people.get(c).doExposure(this.getPathogen());
@@ -200,7 +216,7 @@ public class LakeTown {
                         wereInfected++;
                     }
                 }
-                //System.out.println(wereInfected + " people were infected from food.");
+                System.out.println(wereInfected + "/" + eatContaminatedFood + " people who ate contaminated food were infected.");
             }
         }
     }
@@ -237,6 +253,8 @@ public class LakeTown {
         for(Location loc : city.getLocations()){
             if(loc instanceof Restaurant){
                 loc.doInfect(pathogen);
+                System.out.println("Infected started at: " + loc);
+                break;
             }
         }
     }
@@ -268,15 +286,75 @@ public class LakeTown {
                     break;
                 }
             }
-            if(!pathogenFound || city.getTime() > MAX_TURNS){
-            //if(city.getTime() > MAX_TURNS){
+            //if(!pathogenFound || city.getTime() > MAX_TURNS){
+            if(city.getTime() > MAX_TURNS){
                 outbreak = false;
             }
             if(city.getTime() <= INFECTION_TIME){
                 outbreak = true;
             }
         }
-        
+    }
+
+    /*
+     * Gather and report all infected cases
+     */    
+    public static void findAllCases(City city){
+        List<Person> resistants = Person.groupPeopleByState(city.getPeople()).get(Person.State.RESISTANT);
+        int c = 0;
+        for(Person p : resistants){
+            List<Person.Record> history = p.getHistory();
+            boolean followsAdultRoutine = (p.getRoutine() instanceof AdultRoutine);
+            Location home = null;
+            Location work = null;
+            if(followsAdultRoutine){
+                AdultRoutine routine = (AdultRoutine)p.getRoutine();
+                home = routine.getHome();
+                work = routine.getWorkplace();    
+            }
+            else{
+                home = p.getLocation();
+            }
+            List<Location> lunches = new ArrayList<Location>();
+            int feltSickOn = -1;
+            int feltBetterOn = -1;
+            for(Person.Record rec : history){
+                if(rec.getState() == Person.State.RESISTANT && feltBetterOn < 0){
+                    feltBetterOn = rec.getTime();
+                }
+                else if(rec.getState() == Person.State.INFECTED && feltSickOn < 0){
+                    feltSickOn = rec.getTime();
+                }
+                else if(rec.getState() == Person.State.SUSCEPTIBLE && (rec.getTime() % 24) == 12){
+                    lunches.add(rec.getLocation());
+                }
+            }
+            if(feltBetterOn < 0){
+                feltBetterOn = history.get(history.size()-1).getTime() + 1;
+            }
+            String out = "Case " + c + ",";
+                out += p.getAge() + ",";
+                out += feltSickOn + ",";
+                out += feltBetterOn + ",";
+                out += home.getName() + "%";
+            if(followsAdultRoutine){
+                out += work.getName() + "%";
+            }
+            else{
+                out += "---%";
+            }
+            for(Location lunch : lunches){
+                out += lunch.getName() + ",";
+            }
+            Helper.writeFileLine(FILE_CASES, out);
+            String enc = encodeCase(p, c);
+            Helper.writeFileLine(FILE_ENC_CASES, enc);
+            c++;
+        }
+        System.out.println(resistants.size() + " people were infected.");
+    }
+    
+    public static void findEarlyCases(City city){
         /*
          * Gather initial early cases
          * Observe from SIR graph where they fall
@@ -312,10 +390,38 @@ public class LakeTown {
             Helper.writeFileLine(FILE_CASES, visits);
             ct++;
         }
-        
-        
-        Helper.printPeopleData(FILE_PEOPLE, city);
-        System.out.println("Outbreak Length: " + ((double)city.getTime() / 24.0) + " days.");
+    }
+    
+    public static String encodeCase(Person p, int index){
+        int age = p.getAge();
+        int timeSick = 0;
+        String home = "N/A";
+        String work = "N/A";
+        String visits = "";
+        if(p.getRoutine() instanceof AdultRoutine){
+            AdultRoutine routine = (AdultRoutine)p.getRoutine();
+            String homeName = routine.getHome().getName();
+            home = homeName.split(Pattern.quote(" "))[1];
+            String workName = routine.getWorkplace().getName();
+            work = workName; //workName.split(Pattern.quote(" "))[1];
+        }
+        for(Person.Record rec : p.getHistory()){
+            if(rec.getState() == Person.State.INFECTED){
+                timeSick = rec.getTime();
+                break;
+            }
+            if((rec.getTime() % 24) == 12){
+                if(visits.length() > 0){
+                    visits += ",";
+                }
+                String locName = rec.getLocation().getName();
+                String locNum = locName.split(Pattern.quote(" "))[1];
+                visits += locNum;
+            }
+        }
+        String dl = "%";
+        String res = index + dl + age + dl + timeSick + dl + home + dl + work + dl + visits;
+        return res;
     }
     
     public static void printCitySummary(City city){
