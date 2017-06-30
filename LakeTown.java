@@ -1,3 +1,4 @@
+package fishsamples;
 import fish.*;
 import java.util.*;
 import java.util.regex.*;
@@ -8,21 +9,23 @@ import java.util.regex.*;
  */
 public class LakeTown {
     
-    public static int MAX_TURNS = 400;
-    public static int FAMILY_SIZE = 4;
+    public static int INFECTION_TIME = 13;
+    public static int MAX_TURNS = 1000;
+    public static int FAMILY_SIZE = 4; 
 
-    public static String FILE_COORDS = "coords.txt";
-    public static String FILE_SIR = "sir.txt";
-    public static String FILE_GEO = "geo.txt";
-    public static String FILE_PEOPLE = "people.txt";
-    public static String FILE_SEED = "seed.txt";
+    public static String FILE_COORDS = "files/coords.txt";
+    public static String FILE_SIR = "files/sir.txt";
+    public static String FILE_GEO = "files/geo.txt";
+    public static String FILE_PEOPLE = "files/people.txt";
+    public static String FILE_CASES = "files/cases.txt";
+    public static String FILE_SEED = "files/seed.txt";
 
     public static void main(String[] args){
         
         Helper.initSeededRandom(FILE_SEED);
         
         City city = initCity();
-        initInfection(city);
+        //initInfection(city);
         runSimulation(city);
         
         Helper.closeAllFiles();
@@ -175,6 +178,7 @@ public class LakeTown {
     }
     
     public static class Restaurant extends Location {
+        private double frequencyEatContaminatedItem = 0.64;
         public Restaurant(String id, double lat, double lng, String name){
             super(id, lat, lng, name);
         }
@@ -185,6 +189,18 @@ public class LakeTown {
                         q.doExposure(p.getPathogen());
                     }
                 }
+            }
+            if(this.isInfected()){
+                int eatContaminatedFood = (int)(frequencyEatContaminatedItem * (double)people.size());
+                //System.out.println(eatContaminatedFood + " people ate contaminated food.");
+                int wereInfected = 0;
+                for(int c = 0; c < eatContaminatedFood; c++){
+                    people.get(c).doExposure(this.getPathogen());
+                    if(people.get(c).getPathogen() != null){
+                        wereInfected++;
+                    }
+                }
+                //System.out.println(wereInfected + " people were infected from food.");
             }
         }
     }
@@ -202,7 +218,7 @@ public class LakeTown {
      * Infect a single person
      */
     public static void initInfection(City city){
-        Pathogen pathogen = new Kineosphaera();
+        Pathogen pathogen = new LakeSpore();
         List<Person> people = city.getPeople();
         /*Map<Location, List<Person>> map = Person.groupPeopleByLocation(people);
         for(Map.Entry<Location, List<Person>> entry : map.entrySet()){
@@ -214,8 +230,13 @@ public class LakeTown {
         }*/
         for(Person person : people){
             if(person.getRoutine() instanceof AdultRoutine){
-                person.doInfect(pathogen);
+                //person.doInfect(pathogen);
                 break;
+            }
+        }
+        for(Location loc : city.getLocations()){
+            if(loc instanceof Restaurant){
+                loc.doInfect(pathogen);
             }
         }
     }
@@ -232,6 +253,9 @@ public class LakeTown {
             if(city.getTime() % 120 == 0){
                 System.out.println("Simulation Day: " + (city.getTime() / 24));
             }
+            if(city.getTime() == INFECTION_TIME){
+                initInfection(city);
+            }
             city.doTurn();
             //if(city.getTime() % 24 == 0){
                 Helper.printCityLine(FILE_SIR, city);
@@ -245,11 +269,53 @@ public class LakeTown {
                 }
             }
             if(!pathogenFound || city.getTime() > MAX_TURNS){
+            //if(city.getTime() > MAX_TURNS){
                 outbreak = false;
             }
+            if(city.getTime() <= INFECTION_TIME){
+                outbreak = true;
+            }
         }
+        
+        /*
+         * Gather initial early cases
+         * Observe from SIR graph where they fall
+         * Find sick cases between hour 26 and hour 32 inclusive
+         */
+        int[] range = {188, 204};
+        List<Person> earlyCases = new ArrayList<Person>();
+        for(Person p : city.getPeople()){
+            for(int h = range[0]; h <= range[1]; h++){
+                Person.Record rec = p.getHistory().get(h);
+                if(rec.getState() == Person.State.INFECTED){
+                    earlyCases.add(p);
+                    break;
+                }
+            }
+        }
+        System.out.println("Found " + earlyCases.size() + " early cases.");
+        /*
+         * Retrace early case steps
+         * Observe latent, incubation, and recovery periods from pathogen trials
+         * Pathogen became latent in 10 hours, incubated in 15
+         * Extend range back by 16 hours to see where exposure may have occurred
+         * Couldn't find meaningful links, so go back to the start
+         */
+        int[] retrace = {0, range[1]};
+        int ct = 1;
+        for(Person p : earlyCases){
+            String visits = "Case " + ct + "," + p.getAge() + ",";
+            for(int h = retrace[0]; h <= retrace[1]; h++){
+                Person.Record rec = p.getHistory().get(h);
+                visits += rec.getLocation().getName() + "/" + rec.getState() + ",";
+            }
+            Helper.writeFileLine(FILE_CASES, visits);
+            ct++;
+        }
+        
+        
         Helper.printPeopleData(FILE_PEOPLE, city);
-        System.out.println("Outbreak Length: " + ((double)city.getTime() / 24.0));
+        System.out.println("Outbreak Length: " + ((double)city.getTime() / 24.0) + " days.");
     }
     
     public static void printCitySummary(City city){
