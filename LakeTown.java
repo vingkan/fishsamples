@@ -2,6 +2,7 @@ package fishsamples;
 import fish.*;
 import java.util.*;
 import java.util.regex.*;
+import java.text.*;
 
 /*
  * F.I.S.H.
@@ -10,8 +11,11 @@ import java.util.regex.*;
 public class LakeTown {
     
     public static int INFECTION_TIME = 11;
-    public static int MAX_TURNS = 1000;
+    public static int INTERVENTION_TIME = 24 * 16;
+    public static int MAX_TURNS = 5000;
     public static int FAMILY_SIZE = 4; 
+    public static boolean SIM_BY_DAY = true;
+    public static boolean WRITE_RESULTS = false;
 
     public static String FILE_COORDS = "files/coords.txt";
     public static String FILE_SIR = "files/sir.txt";
@@ -24,12 +28,21 @@ public class LakeTown {
     public static void main(String[] args){
         
         Helper.initSeededRandom(FILE_SEED);
+        if(!WRITE_RESULTS){
+            Helper.disableWrites();
+        }
         
-        City city = initCity();
+        int quarantineFor = Integer.parseInt(args[0]) * 24;
+        City city = initCity(quarantineFor);
         //initInfection(city);
         runSimulation(city);
         findAllCases(city);
         //findEarlyCases(city);
+        
+        int total = QuarantineMeasure.getTotalAffected();
+        double cost = QuarantineMeasure.getTotalCost();
+        NumberFormat mf = NumberFormat.getCurrencyInstance(new Locale("en", "US"));
+        System.out.println("Quarantined " + total + " people at cost of " + mf.format(cost));
         
         //Helper.printPeopleData(FILE_PEOPLE, city);
         System.out.println("Outbreak Length: " + ((double)city.getTime() / 24.0) + " days.");
@@ -40,7 +53,7 @@ public class LakeTown {
     /*
      * Populate city with locations, people, and routines
      */
-    public static City initCity(){
+    public static City initCity(int quarantineFor){
         City city = new City("Lake Town");
         List<String[]> coords = Helper.readCoordsFromFile(FILE_COORDS);
         for(int lidx = 0; lidx < coords.size(); lidx++){
@@ -78,7 +91,11 @@ public class LakeTown {
                         ag = AgeGroup.ADULT;
                         routine = new AdultRoutine(city, loc);
                     }
-                    Person person = new Person(ag, routine, loc);
+                    String pid = "LT" + city.getPeople().size();
+                    Person person = new Person(pid, ag, routine, loc);
+                    person.addNamedLocation("Home", loc);
+                    ControlMeasure control = new QuarantineMeasure(person, quarantineFor);
+                    person.setControlMeasure(control);
                     city.addPerson(person);
                 }
             }
@@ -94,13 +111,69 @@ public class LakeTown {
             }
             locMap.get(cls).add(lc);
         }
+        System.out.println("City Overview: " + city.getName());
+        System.out.println("Total Locations: " + city.getLocations().size());
         for(Map.Entry<Class, List<Location>> entry : locMap.entrySet()){
             System.out.println(entry.getKey() + ": " + entry.getValue().size());
         }
+        System.out.println("Total Population: " + city.getPeople().size());
         for(Map.Entry<AgeGroup, List<Person>> entry : Person.groupPeopleByAgeGroup(city.getPeople()).entrySet()){
             System.out.println(entry.getKey() + ": " + entry.getValue().size());
         }
         return city;
+    }
+    
+    public static class QuarantineMeasure extends ControlMeasure {
+        private boolean isQuarantined = false;
+        private int timeQuarantined = 0;
+        private int quarantineFor = (24 * 20);
+        private Location site = null;
+        private List<String> targetLocations;
+        QuarantineMeasure(Person person, int quarantineFor){
+            super("Quarantine");
+            this.setStartDay(17);
+            this.setEndDay(MAX_TURNS);
+            this.quarantineFor = quarantineFor;
+            this.targetLocations = new ArrayList<String>();
+            this.targetLocations.add("Restaurant 1 (R)");
+            this.targetLocations.add("Restaurant 7 (R)");
+            this.targetLocations.add("Restaurant 16 (R)");
+            this.site = person.getNamedLocation("Home");
+        }
+        public Location applyMeasure(City city, Person person, Location nextLoc){
+            Location res = nextLoc;
+            if(isQuarantined){
+                if(site != null){
+                    res = site;   
+                }
+                if(timeQuarantined > quarantineFor){
+                    res = nextLoc;
+                }
+                timeQuarantined++;
+            }
+            else if(person.getState() == Person.State.SUSCEPTIBLE){
+                for(String locName : targetLocations){
+                    if(nextLoc.getName().equals(locName)){
+                        isQuarantined = true;
+                        break;
+                    }
+                }
+                if(!isQuarantined){
+                    for(String locName : targetLocations){
+                        for(Person.Record rec : person.getHistory()){
+                            if(rec.getLocation().getName().equals(locName)){
+                                isQuarantined = true;
+                                break;
+                            }
+                        }
+                        if(isQuarantined){
+                            break;
+                        }
+                    }
+                }
+            }
+            return res;
+        }
     }
     
     public static class AdultRoutine extends Routine {
@@ -141,9 +214,6 @@ public class LakeTown {
             }
             else{
                 res = this.workplace;
-            }
-            if(person.feelsSick()){
-                res = this.home;
             }
             return res;
         }
@@ -192,14 +262,14 @@ public class LakeTown {
     }
     
     public static class Restaurant extends Location {
-        private double frequencyEatContaminatedItem = 0.14;
+        private double frequencyEatContaminatedItem = 0.54;
         public Restaurant(String id, double lat, double lng, String name){
             super(id, lat, lng, name);
         }
         public void doInteractions(List<Person> people){
             List<Person> contagious = Person.getContagious(people);
             for(Person p : contagious){
-                for(int pidx = 0; pidx < 3; pidx++){
+                for(int pidx = 0; pidx < 2; pidx++){
                     int rand = (int)(Helper.nextSeed() * (double)people.size());
                     Person q = people.get(rand);
                     if(p.getPathogen() != null){
@@ -211,12 +281,13 @@ public class LakeTown {
                 int eatContaminatedFood = (int)(frequencyEatContaminatedItem * (double)people.size());
                 int wereInfected = 0;
                 for(int c = 0; c < eatContaminatedFood; c++){
-                    people.get(c).doExposure(this.getPathogen());
-                    if(people.get(c).getPathogen() != null){
+                    int rand = (int)(Helper.nextSeed() * (double)people.size());
+                    people.get(rand).doExposure(this.getPathogen());
+                    if(people.get(rand).getPathogen() != null){
                         wereInfected++;
                     }
                 }
-                System.out.println(wereInfected + "/" + eatContaminatedFood + " people who ate contaminated food were infected.");
+                //System.out.println(wereInfected + "/" + eatContaminatedFood + "/" + people.size() + " people who ate contaminated food were infected.");
             }
         }
     }
@@ -263,22 +334,32 @@ public class LakeTown {
      * Run outbreak to completion
      */
     public static void runSimulation(City city){
-        Main.printCitySummary(city);
         Helper.printCityLine(FILE_SIR, city);
         Helper.printLocationLine(FILE_GEO, city);
         boolean outbreak = true;
         while(outbreak){
-            if(city.getTime() % 120 == 0){
+            if(city.getTime() % 600 == 0){
                 System.out.println("Simulation Day: " + (city.getTime() / 24));
             }
             if(city.getTime() == INFECTION_TIME){
                 initInfection(city);
             }
+            if(city.getTime() == INTERVENTION_TIME){
+                Location source = Location.getLocationByName(city.getLocations(), "Restaurant 1 (R)");
+                String disRes = source.doDisinfect() ? "Successfully" : "Unsuccessfully";
+                System.out.println(disRes + " disinfected " + source);
+            }
             city.doTurn();
-            //if(city.getTime() % 24 == 0){
+            if(SIM_BY_DAY){
+                if(city.getTime() % 24 == 0){
+                    Helper.printCityLine(FILE_SIR, city);
+                    Helper.printLocationLine(FILE_GEO, city);
+                }
+            }
+            else{
                 Helper.printCityLine(FILE_SIR, city);
                 Helper.printLocationLine(FILE_GEO, city);
-            //}
+            }
             boolean pathogenFound = false;
             for(Person person : city.getPeople()){
                 if(person.getPathogen() != null){
@@ -286,12 +367,17 @@ public class LakeTown {
                     break;
                 }
             }
-            //if(!pathogenFound || city.getTime() > MAX_TURNS){
-            if(city.getTime() > MAX_TURNS){
-                outbreak = false;
-            }
             if(city.getTime() <= INFECTION_TIME){
                 outbreak = true;
+            }
+            else if(!pathogenFound){
+            //if(city.getTime() > MAX_TURNS){
+                outbreak = false;
+                System.out.println("Pathogen died out.");
+            }
+            else if(city.getTime() > MAX_TURNS){
+                outbreak = false;
+                System.out.println("Ran out of turns.");
             }
         }
     }
@@ -422,19 +508,6 @@ public class LakeTown {
         String dl = "%";
         String res = index + dl + age + dl + timeSick + dl + home + dl + work + dl + visits;
         return res;
-    }
-    
-    public static void printCitySummary(City city){
-        List<Person> people = city.getPeople();
-        int locations = city.getLocations().size();
-        System.out.println(city.getName() + " at Time: " + city.getTime());
-        System.out.println(locations + " locations");
-        System.out.println(people.size() + " people");
-        HashMap<Person.State, List<Person>> stateMap = Person.groupPeopleByState(people);
-        for(Person.State state : Person.State.values()){
-            String out = state.getName() + ": " + stateMap.get(state).size();
-            System.out.println(out);
-        }
     }
 
 }
