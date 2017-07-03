@@ -23,17 +23,15 @@ public class LakeTown {
     public static String FILE_PEOPLE = "files/people.txt";
     public static String FILE_CASES = "files/cases.txt";
     public static String FILE_ENC_CASES = "files/enc_cases.txt";
-    public static String FILE_SEED = "files/seed.txt";
 
     public static void main(String[] args){
         
-        Helper.initSeededRandom(FILE_SEED);
+        Helper.setSeed(12);
         if(!WRITE_RESULTS){
             Helper.disableWrites();
         }
         
-        int quarantineFor = Integer.parseInt(args[0]) * 24;
-        City city = initCity(quarantineFor);
+        City city = initCity();
         //initInfection(city);
         runSimulation(city);
         findAllCases(city);
@@ -53,7 +51,7 @@ public class LakeTown {
     /*
      * Populate city with locations, people, and routines
      */
-    public static City initCity(int quarantineFor){
+    public static City initCity(){
         City city = new City("Lake Town");
         List<String[]> coords = Helper.readCoordsFromFile(FILE_COORDS);
         for(int lidx = 0; lidx < coords.size(); lidx++){
@@ -94,7 +92,7 @@ public class LakeTown {
                     String pid = "LT" + city.getPeople().size();
                     Person person = new Person(pid, ag, routine, loc);
                     person.addNamedLocation("Home", loc);
-                    ControlMeasure control = new QuarantineMeasure(person, quarantineFor);
+                    ControlMeasure control = new QuarantineMeasure(person);
                     person.setControlMeasure(control);
                     city.addPerson(person);
                 }
@@ -123,17 +121,42 @@ public class LakeTown {
         return city;
     }
     
+    public static class IsolationMeasure extends ControlMeasure {
+        
+        private Location site;
+        
+        public IsolationMeasure(Person person){
+            super("Isolation");
+            this.setStartDay(17);
+            this.setEndDay(MAX_TURNS);
+            this.site = person.getNamedLocation("Home");
+        }
+        
+        public Location applyMeasure(City city, Person person, Location nextLoc){
+            Location res = nextLoc;
+            if(person.feelsSick()){
+                res = this.site;
+            }
+            return res;
+        }
+        
+    }
+    
     public static class QuarantineMeasure extends ControlMeasure {
+        
+        private boolean searchedHistory = false;
+        private boolean wasQuarantined = false;
         private boolean isQuarantined = false;
         private int timeQuarantined = 0;
-        private int quarantineFor = (24 * 20);
+        private int quarantineFor = 0;
         private Location site = null;
         private List<String> targetLocations;
-        QuarantineMeasure(Person person, int quarantineFor){
+        
+        public QuarantineMeasure(Person person){
             super("Quarantine");
             this.setStartDay(17);
             this.setEndDay(MAX_TURNS);
-            this.quarantineFor = quarantineFor;
+            this.quarantineFor = 24 * 10;
             this.targetLocations = new ArrayList<String>();
             this.targetLocations.add("Restaurant 1 (R)");
             this.targetLocations.add("Restaurant 7 (R)");
@@ -148,21 +171,30 @@ public class LakeTown {
                 }
                 if(timeQuarantined > quarantineFor){
                     res = nextLoc;
+                    isQuarantined = false;
+                }
+                int daysQuarantined = (int) Math.round(timeQuarantined / 24);
+                if(daysQuarantined > 4 && !person.feelsSick()){
+                    //res = nextLoc;
+                    //isQuarantined = false;
                 }
                 timeQuarantined++;
             }
-            else if(person.getState() == Person.State.SUSCEPTIBLE){
+            else if(!wasQuarantined && person.getState() == Person.State.SUSCEPTIBLE){
                 for(String locName : targetLocations){
                     if(nextLoc.getName().equals(locName)){
                         isQuarantined = true;
+                        wasQuarantined = true;
                         break;
                     }
                 }
-                if(!isQuarantined){
+                if(!isQuarantined && !searchedHistory){
+                    searchedHistory = true;
                     for(String locName : targetLocations){
                         for(Person.Record rec : person.getHistory()){
                             if(rec.getLocation().getName().equals(locName)){
                                 isQuarantined = true;
+                                wasQuarantined = true;
                                 break;
                             }
                         }
