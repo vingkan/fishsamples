@@ -224,8 +224,8 @@ public class LakeTown {
                     groceries.add(loc);
                 }
             }
-            int randomWork = (int)(Helper.nextSeed() * workplaces.size());
-            int randomGroc = (int)(Helper.nextSeed() * groceries.size());
+            int randomWork = Helper.getRandom().nextInt(workplaces.size());
+            int randomGroc = Helper.getRandom().nextInt(groceries.size());
             this.workplace = workplaces.get(randomWork);
             this.groceryStore = groceries.get(randomGroc);
         }
@@ -241,7 +241,7 @@ public class LakeTown {
                         choices.add(loc);
                     }
                 }
-                int randomRes = (int)(Helper.nextSeed() * choices.size());
+                int randomRes = Helper.getRandom().nextInt(choices.size());
                 res = choices.get(randomRes);
             }
             else{
@@ -302,7 +302,7 @@ public class LakeTown {
             List<Person> contagious = Person.getContagious(people);
             for(Person p : contagious){
                 for(int pidx = 0; pidx < 2; pidx++){
-                    int rand = (int)(Helper.nextSeed() * (double)people.size());
+                    int rand = Helper.getRandom().nextInt(people.size());
                     Person q = people.get(rand);
                     if(p.getPathogen() != null){
                         q.doExposure(p.getPathogen());
@@ -313,7 +313,7 @@ public class LakeTown {
                 int eatContaminatedFood = (int)(frequencyEatContaminatedItem * (double)people.size());
                 int wereInfected = 0;
                 for(int c = 0; c < eatContaminatedFood; c++){
-                    int rand = (int)(Helper.nextSeed() * (double)people.size());
+                    int rand = Helper.getRandom().nextInt(people.size());
                     people.get(rand).doExposure(this.getPathogen());
                     if(people.get(rand).getPathogen() != null){
                         wereInfected++;
