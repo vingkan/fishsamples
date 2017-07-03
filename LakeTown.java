@@ -15,7 +15,7 @@ public class LakeTown {
     public static int MAX_TURNS = 5000;
     public static int FAMILY_SIZE = 4; 
     public static boolean SIM_BY_DAY = true;
-    public static boolean WRITE_RESULTS = false;
+    public static boolean WRITE_RESULTS = true;
 
     public static String FILE_COORDS = "files/coords.txt";
     public static String FILE_SIR = "files/sir.txt";
@@ -26,7 +26,11 @@ public class LakeTown {
 
     public static void main(String[] args){
         
-        Helper.setSeed(12);
+        int seed = 12;
+        if(args.length >= 1){
+            seed = Integer.parseInt(args[0]);
+        }
+        Helper.setSeed(seed);
         if(!WRITE_RESULTS){
             Helper.disableWrites();
         }
@@ -155,7 +159,7 @@ public class LakeTown {
         public QuarantineMeasure(Person person){
             super("Quarantine");
             this.setStartDay(17);
-            this.setEndDay(MAX_TURNS);
+            this.setEndDay(12 + 19);
             this.quarantineFor = 24 * 10;
             this.targetLocations = new ArrayList<String>();
             this.targetLocations.add("Restaurant 1 (R)");
