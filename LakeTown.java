@@ -10,34 +10,45 @@ import java.text.*;
  */
 public class LakeTown {
     
-    public static int INFECTION_TIME = 11;
-    public static int INTERVENTION_TIME = 24 * 16;
-    public static int MAX_TURNS = 5000;
-    public static int FAMILY_SIZE = 4; 
-    public static boolean SIM_BY_DAY = true;
-    public static boolean WRITE_RESULTS = true;
-
     public static String FILE_COORDS = "files/coords.txt";
     public static String FILE_SIR = "files/sir.txt";
     public static String FILE_GEO = "files/geo.txt";
     public static String FILE_PEOPLE = "files/people.txt";
     public static String FILE_CASES = "files/cases.txt";
     public static String FILE_ENC_CASES = "files/enc_cases.txt";
+    
+    public static String INFECTION_SOURCE = "Restaurant 2 (R)";
+    public static int INFECTION_TIME = 11;
+    public static int INTERVENTION_TIME = 24 * 16;
+    public static int MAX_TURNS = 5000;
+    public static int FAMILY_SIZE = 4;
+    public static int ADULTS_PER_FAMILY = 2;
+    public static boolean SIM_BY_DAY = true;
+    public static boolean WRITE_RESULTS = true;
 
     public static void main(String[] args){
         
         int seed = 12;
+        boolean quarantine = false;
         if(args.length >= 1){
             seed = Integer.parseInt(args[0]);
+        }
+        if(args.length >= 2){
+            quarantine = (args[1].equals("q"));
         }
         Helper.setSeed(seed);
         if(!WRITE_RESULTS){
             Helper.disableWrites();
         }
         
-        City city = initCity();
+        List<String> targetLocations = new ArrayList<String>();
+            targetLocations.add("Restaurant 2 (R)");
+            targetLocations.add("Restaurant 7 (R)");
+            targetLocations.add("Restaurant 16 (R)");
+        
+        City city = initCity(quarantine, targetLocations);
         //initInfection(city);
-        runSimulation(city);
+        runSimulation(city, targetLocations);
         findAllCases(city);
         //findEarlyCases(city);
         
@@ -55,7 +66,7 @@ public class LakeTown {
     /*
      * Populate city with locations, people, and routines
      */
-    public static City initCity(){
+    public static City initCity(boolean quarantine, List<String> targetLocations){
         City city = new City("Lake Town");
         List<String[]> coords = Helper.readCoordsFromFile(FILE_COORDS);
         for(int lidx = 0; lidx < coords.size(); lidx++){
@@ -89,15 +100,17 @@ public class LakeTown {
                 for(int f = 0; f < FAMILY_SIZE; f++){
                     AgeGroup ag = AgeGroup.CHILD;
                     Routine routine = new ChildRoutine();
-                    if(f < 2){
+                    if(f < ADULTS_PER_FAMILY){
                         ag = AgeGroup.ADULT;
                         routine = new AdultRoutine(city, loc);
                     }
                     String pid = "LT" + city.getPeople().size();
                     Person person = new Person(pid, ag, routine, loc);
                     person.addNamedLocation("Home", loc);
-                    ControlMeasure control = new QuarantineMeasure(person);
-                    person.setControlMeasure(control);
+                    if(quarantine){
+                        ControlMeasure control = new QuarantineMeasure(person, targetLocations);
+                        person.setControlMeasure(control);
+                    }
                     city.addPerson(person);
                 }
             }
@@ -156,15 +169,12 @@ public class LakeTown {
         private Location site = null;
         private List<String> targetLocations;
         
-        public QuarantineMeasure(Person person){
+        public QuarantineMeasure(Person person, List<String> targetLocations){
             super("Quarantine");
             this.setStartDay(17);
-            this.setEndDay(12 + 19);
-            this.quarantineFor = 24 * 10;
-            this.targetLocations = new ArrayList<String>();
-            this.targetLocations.add("Restaurant 1 (R)");
-            this.targetLocations.add("Restaurant 7 (R)");
-            this.targetLocations.add("Restaurant 16 (R)");
+            this.setEndDay(17 + 22);
+            this.quarantineFor = 24 * 11;
+            this.targetLocations = targetLocations;
             this.site = person.getNamedLocation("Home");
         }
         public Location applyMeasure(City city, Person person, Location nextLoc){
@@ -176,11 +186,6 @@ public class LakeTown {
                 if(timeQuarantined > quarantineFor){
                     res = nextLoc;
                     isQuarantined = false;
-                }
-                int daysQuarantined = (int) Math.round(timeQuarantined / 24);
-                if(daysQuarantined > 4 && !person.feelsSick()){
-                    //res = nextLoc;
-                    //isQuarantined = false;
                 }
                 timeQuarantined++;
             }
@@ -250,6 +255,9 @@ public class LakeTown {
             }
             else{
                 res = this.workplace;
+            }
+            if(person.feelsSick()){
+                res = this.home;
             }
             return res;
         }
@@ -338,38 +346,19 @@ public class LakeTown {
     }
     
     /*
-     * Infect a single person
+     * Infect a single location
      */
     public static void initInfection(City city){
         Pathogen pathogen = new LakeSpore();
-        List<Person> people = city.getPeople();
-        /*Map<Location, List<Person>> map = Person.groupPeopleByLocation(people);
-        for(Map.Entry<Location, List<Person>> entry : map.entrySet()){
-            if(entry.getKey() instanceof Restaurant){
-                if(entry.getValue().size() >= 1){
-                    entry.getValue().get(0).doInfect(pathogen);
-                }
-            }
-        }*/
-        for(Person person : people){
-            if(person.getRoutine() instanceof AdultRoutine){
-                //person.doInfect(pathogen);
-                break;
-            }
-        }
-        for(Location loc : city.getLocations()){
-            if(loc instanceof Restaurant){
-                loc.doInfect(pathogen);
-                System.out.println("Infected started at: " + loc);
-                break;
-            }
-        }
+        Location loc = Location.getLocationByName(city.getLocations(), INFECTION_SOURCE);
+        loc.doInfect(pathogen);
+        System.out.println("Infected started at: " + loc);
     }
     
     /*
      * Run outbreak to completion
      */
-    public static void runSimulation(City city){
+    public static void runSimulation(City city, List<String> targetLocations){
         Helper.printCityLine(FILE_SIR, city);
         Helper.printLocationLine(FILE_GEO, city);
         boolean outbreak = true;
@@ -381,9 +370,11 @@ public class LakeTown {
                 initInfection(city);
             }
             if(city.getTime() == INTERVENTION_TIME){
-                Location source = Location.getLocationByName(city.getLocations(), "Restaurant 1 (R)");
-                String disRes = source.doDisinfect() ? "Successfully" : "Unsuccessfully";
-                System.out.println(disRes + " disinfected " + source);
+                for(String targetName : targetLocations){
+                    Location source = Location.getLocationByName(city.getLocations(), targetName);
+                    String disRes = source.doDisinfect() ? "Successfully" : "Unsuccessfully";
+                    System.out.println(disRes + " disinfected " + source);
+                }
             }
             city.doTurn();
             if(SIM_BY_DAY){
